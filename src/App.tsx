@@ -1,116 +1,148 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, Check, CheckCircle2, ChevronDown, Download, Eye, FileImage, Grid2X2, Heart, ImagePlus, LayoutDashboard, LockKeyhole, LogIn, LogOut, Menu, MoreHorizontal, Pencil, Plus, Search, Settings2, ShieldAlert, Shuffle, Sparkles, Trash2, Trophy, UploadCloud, Users, Vote, X } from 'lucide-react';
-import { categories, downloadCsv, emptyVotes, initialDemo, loadDemo, makeWebp, phaseLabels, shuffleStable, STORAGE_KEY, tally } from './lib/demo';
-import type { Artwork, Category, DemoData, Phase, Screen, Student, Votes } from './types';
+import { ArrowRight, ArrowUpRight, Check, CheckCircle2, Download, Eye, FileImage, Grid2X2, ImagePlus, LayoutDashboard, LogOut, Menu, Pencil, Plus, Search, Settings2, ShieldAlert, Shuffle, Sparkles, Trash2, Trophy, Users, Vote, X } from 'lucide-react';
+import { categories, downloadCsv, emptyVotes, makeWebp, phaseLabels, shuffleStable } from './lib/demo';
+import { api, configured, forgetToken, savedToken, setToken, type Snapshot } from './lib/api';
+import type { Artwork, Phase, Screen, Student, Votes, Category } from './types';
+
+const blank:Snapshot = {phase:'upload',artworks:[],student:null,submitted:false,myVotes:emptyVotes(),students:[]};
 
 function App(){
- const [data,setData]=useState<DemoData>(loadDemo);
- const [screen,setScreen]=useState<Screen>('home');
- const [student,setStudent]=useState<Student|null>(null);
- const [currentCategory,setCurrentCategory]=useState(1);
- const [votes,setVotes]=useState<Votes>(emptyVotes());
- const [enterId,setEnterId]=useState('');const [enterName,setEnterName]=useState('');
- const [isAdmin,setIsAdmin]=useState(false);const [mobileOpen,setMobileOpen]=useState(false);
- const [preview,setPreview]=useState<Artwork|null>(null);const [notice,setNotice]=useState('');
- const [uploadCategory,setUploadCategory]=useState(1);const [uploadTitle,setUploadTitle]=useState('');const [uploadImage,setUploadImage]=useState('');const [editingId,setEditingId]=useState<string|null>(null);const [uploadBusy,setUploadBusy]=useState(false);
- const [adminTab,setAdminTab]=useState<'overview'|'artworks'|'students'|'results'>('overview');
- const [filter,setFilter]=useState('');const [confirmSubmit,setConfirmSubmit]=useState(false);
- const [csvText,setCsvText]=useState('');
- useEffect(()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data));}catch{if(!notice)setNotice('브라우저 저장 용량을 초과했습니다. 큰 이미지가 많다면 데모 데이터가 유지되지 않을 수 있습니다.');}},[data]);
- useEffect(()=>{if(notice){const timer=setTimeout(()=>setNotice(''),5500);return()=>clearTimeout(timer);}},[notice]);
- const submitted=!!student && data.submissions.some(s=>s.studentId===student.id);
- const currentSubmission=student?data.submissions.find(s=>s.studentId===student.id):undefined;
- const selectedVotes=currentSubmission?.votes||votes;
- const selectedCount=Object.values(selectedVotes).reduce((n,v)=>n+v.length,0);
- const images=data.artworks.filter(a=>a.categoryId===currentCategory && a.approved);
- const shown=useMemo(()=>shuffleStable(images,student?.id||'guest',currentCategory),[data.artworks,currentCategory,student?.id]);
- const personalArt=data.artworks.filter(a=>a.ownerId===student?.id);
- const canUpload=data.phase==='upload' && !isAdmin;
- const canVote=data.phase==='vote' && !submitted && !isAdmin;
- const resultsVisible=data.phase==='results'||isAdmin;
+ const [data,setData] = useState<Snapshot>(blank);
+ const [screen,setScreen] = useState<Screen>('home');
+ const [student,setStudent] = useState<Student|null>(null);
+ const [isAdmin,setAdmin] = useState(false);
+ const [currentCategory,setCurrentCategory] = useState(1);
+ const [votes,setVotes] = useState<Votes>(emptyVotes());
+ const [enterId,setEnterId] = useState(''); const [enterName,setEnterName] = useState('');
+ const [adminPass,setAdminPass] = useState('');
+ const [notice,setNotice] = useState(''); const [busy,setBusy] = useState(false);
+ const [preview,setPreview] = useState<Artwork|null>(null);
+ const [uploadCategory,setUploadCategory] = useState(1);const [uploadTitle,setUploadTitle] = useState('');const [uploadImage,setUploadImage] = useState('');const [editingId,setEditingId] = useState<string|null>(null);
+ const [adminTab,setAdminTab] = useState<'overview'|'artworks'|'students'|'results'>('overview');
+ const [csvText,setCsvText] = useState('');const [filter,setFilter] = useState('');const [confirmSubmit,setConfirmSubmit]=useState(false);
+ const [mobileOpen,setMobileOpen] = useState(false);const [ready,setReady] = useState(false);
  const page=(s:Screen)=>{setScreen(s);setMobileOpen(false);window.scrollTo({top:0,behavior:'smooth'});};
- const update=(apply:(prev:DemoData)=>DemoData)=>setData(prev=>apply(prev));
- const enter=()=>{const id=enterId.trim(), name=enterName.trim();if(!/^\d{4,8}$/.test(id)||!name){setNotice('학번(숫자 4~8자리)과 이름을 정확하게 입력해 주세요.');return;}
-  const existing=data.students.find(s=>s.id===id);if(existing && existing.name!==name){setNotice('이 학번은 다른 이름으로 등록되어 있습니다. (데모에서는 인증되지 않습니다.)');return;}
-  const person=existing||{id,name,nickname:name};
-  if(!existing)update(prev=>({...prev,students:[...prev.students,person]}));
-  setStudent(person);setIsAdmin(false);setVotes(data.submissions.find(s=>s.studentId===id)?.votes||emptyVotes());page('upload');setNotice('로그인되었습니다. 이 시연용 사이트는 실제 본인 인증 기능이 없습니다.');
+ const refresh=async(access?:string,admin?:boolean)=>{
+  const next=await api<Snapshot>('snapshot',{},access);
+  setData(next);
+  if(admin === true) {setAdmin(true);setStudent(null);}
+  else if(admin === false || next.student) {setAdmin(false);setStudent(next.student);}
+  return next;
  };
- const switchAdmin=()=>{setIsAdmin(true);setStudent(null);setVotes(emptyVotes());page('admin');setNotice('관리자 화면 미리보기입니다. 현재는 실제 관리자 인증 기능이 없습니다.');};
- const leave=()=>{setIsAdmin(false);setStudent(null);setVotes(emptyVotes());page('home');};
- const choose=(id:string)=>{if(!canVote||!student){setNotice('지금은 투표를 수정할 수 없습니다.');return;}const a=data.artworks.find(x=>x.id===id);if(!a)return;
-  if(a.ownerId===student.id){setNotice('본인의 작품에는 투표할 수 없습니다.');return;}
-  setVotes(old=>{const items=old[currentCategory]||[];if(items.includes(id))return {...old,[currentCategory]:items.filter(x=>x!==id)};if(items.length>=3){setNotice('한 구역에는 최대 3개 작품까지 선택할 수 있습니다.');return old;}return {...old,[currentCategory]:[...items,id]};});
+ useEffect(()=>{
+  let live=true;
+  (async()=>{
+   if(savedToken()) {
+    try {
+     const next=await api<Snapshot>('snapshot');
+     if(!live)return;
+     setData(next);
+     if(next.student) {setStudent(next.student);setAdmin(false);page('upload');}
+     else {setAdmin(true);page('admin');}
+    } catch {forgetToken();}
+   }
+   if(live)setReady(true);
+  })();
+  return()=>{live=false;};
+ },[]);
+ useEffect(()=>{if(!notice)return;const id=setTimeout(()=>setNotice(''),6500);return()=>clearTimeout(id);},[notice]);
+ const task=async(fn:()=>Promise<void>)=>{setBusy(true);try{await fn();}catch(e){setNotice(e instanceof Error?e.message:'오류가 발생했습니다.');}finally{setBusy(false);}};
+ const enter=()=>task(async()=>{
+  if(!/^\d{4,8}$/.test(enterId.trim())||!enterName.trim()) throw Error('학번과 이름을 정확하게 입력해 주세요.');
+  const result=await api<{token:string}>('student-login',{studentNumber:enterId.trim(),name:enterName.trim()});
+  setToken(result.token);
+  const next=await refresh(result.token,false);
+  setVotes(next.myVotes||emptyVotes());page('upload');setNotice('로그인되었습니다. 작품과 투표 기록은 서버에 저장됩니다.');
+ });
+ const loginAdmin=()=>task(async()=>{
+  const result=await api<{token:string}>('admin-login',{password:adminPass});
+  setToken(result.token);setAdminPass('');await refresh(result.token,true);page('admin');setNotice('관리자로 로그인했습니다.');
+ });
+ const leave=()=>task(async()=>{
+  try{await api('logout');}catch{}
+  forgetToken();setStudent(null);setAdmin(false);setData(blank);setVotes(emptyVotes());setEnterId('');setEnterName('');page('home');
+ });
+ const personalArt=data.artworks.filter(a=>a.ownerId==='ME');
+ const shown=useMemo(()=>shuffleStable(data.artworks.filter(a=>a.categoryId===currentCategory&&a.approved),student?.id||'guest',currentCategory),[data.artworks,currentCategory,student?.id]);
+ const selectedVotes=data.submitted?data.myVotes:votes;
+ const selectedCount=Object.values(selectedVotes).reduce((sum,ids)=>sum+ids.length,0);
+ const canVote=!!student&&data.phase==='vote'&&!data.submitted;
+ const canUpload=!!student&&data.phase==='upload';
+ const resultsVisible=data.phase==='results'||isAdmin;
+ const choose=(id:string,category=currentCategory)=>{
+  if(!canVote){setNotice('현재는 투표를 선택할 수 없습니다.');return;}
+  const artwork=data.artworks.find(a=>a.id===id);
+  if(!artwork)return;
+  if(artwork.ownerId==='ME'){setNotice('본인의 작품에는 투표할 수 없습니다.');return;}
+  setVotes(prev=>{
+   const old=prev[category]||[];
+   if(old.includes(id))return {...prev,[category]:old.filter(x=>x!==id)};
+   if(old.length>=3){setNotice('섹션별 최대 3개까지 선택할 수 있습니다.');return prev;}
+   return {...prev,[category]:[...old,id]};
+  });
  };
- const submit=()=>{if(!student||data.phase!=='vote'||submitted)return;
-  if(selectedCount<1||selectedCount>15){setNotice('최소 1개부터 최대 15개까지 선택할 수 있습니다.');setConfirmSubmit(false);return;}
-  const valid=data.categories.every(c=>{const ids=votes[c.id]||[];return ids.length<=3 && new Set(ids).size===ids.length && ids.every(id=>{const a=data.artworks.find(x=>x.id===id);return a?.categoryId===c.id && a.approved && a.ownerId!==student.id;});});
-  if(!valid){setNotice('유효하지 않은 투표가 있습니다. 작품 선택을 확인해 주세요.');return;}
-  update(prev=>({...prev,submissions:[...prev.submissions.filter(s=>s.studentId!==student.id),{studentId:student.id,votes,submittedAt:Date.now()}]}));setConfirmSubmit(false);page('my-votes');setNotice('데모 투표가 제출되었습니다. 실제 서버 저장은 추후 연결됩니다.');
- };
- const onImage=async(file?:File)=>{if(!file)return;setUploadBusy(true);try{setUploadImage(await makeWebp(file));}catch(e){setNotice((e as Error).message);}finally{setUploadBusy(false);}};
- const saveArtwork=()=>{if(!student||!canUpload)return;if(!uploadTitle.trim()||!uploadImage){setNotice('작품 제목과 이미지를 모두 입력해 주세요.');return;}
-  const artwork:Artwork={id:editingId||`art-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,categoryId:uploadCategory,ownerId:student.id,title:uploadTitle.trim(),image:uploadImage,approved:true,createdAt:Date.now()};
-  update(prev=>({...prev,artworks:editingId?prev.artworks.map(a=>a.id===editingId&&a.ownerId===student.id?artwork:a):[...prev.artworks,artwork]}));setUploadImage('');setUploadTitle('');setEditingId(null);setCurrentCategory(uploadCategory);setNotice('작품이 등록되었습니다. 투표하기에서 같은 섹션을 선택하면 확인할 수 있습니다.');
- };
+ const submit=()=>task(async()=>{
+  if(!canVote)return;
+  const ballot=Object.values(votes).flat();
+  if(ballot.length<1||ballot.length>15)throw Error('1~15개의 작품을 선택해 주세요.');
+  await api('submit',{ballot});
+  const next=await refresh();setVotes(next.myVotes||emptyVotes());setConfirmSubmit(false);page('my-votes');setNotice('최종 투표가 서버에 저장되었습니다.');
+ });
+ const onImage=(file?:File)=>{if(!file)return;task(async()=>{setUploadImage(await makeWebp(file));});};
+ const saveArtwork=()=>task(async()=>{
+  if(!canUpload)return;
+  if(!uploadTitle.trim() || (!uploadImage&&!editingId))throw Error('제목과 작품 사진을 입력해 주세요.');
+  await api('save-artwork',{categoryId:uploadCategory,title:uploadTitle.trim(),image:uploadImage.startsWith('data:')?uploadImage:undefined,editingId});
+  await refresh();setUploadTitle('');setUploadImage('');setEditingId(null);setCurrentCategory(uploadCategory);setNotice('선택한 섹션에 작품이 저장되었습니다.');
+ });
  const editArtwork=(a:Artwork)=>{setUploadCategory(a.categoryId);setUploadTitle(a.title);setUploadImage(a.image);setEditingId(a.id);page('upload');};
- const deleteArtwork=(a:Artwork)=>{if(!(isAdmin||(student?.id===a.ownerId&&data.phase==='upload')))return;if(!window.confirm(`'${a.title}' 작품을 삭제할까요?`))return;
-  update(prev=>({...prev,artworks:prev.artworks.filter(x=>x.id!==a.id)}));setPreview(null);setNotice('작품이 삭제되었습니다.');};
- const resetDemo=()=>{if(window.confirm('모든 데모 변경 사항을 초기화할까요?')){setData(initialDemo());setVotes(emptyVotes());setStudent(null);setIsAdmin(false);page('home');}};
- const changePhase=(phase:Phase)=>{update(p=>({...p,phase}));setNotice(`${phaseLabels[phase]} 단계로 변경했습니다. (데모 화면 설정)`);};
- const importStudents=()=>{const lines=csvText.trim().split(/\r?\n/).filter(Boolean);const newStudents:Student[]=[];for(const line of lines){const [id,name,nickname]=line.split(/[\t,]/).map(s=>s.trim());if(!/^\d{4,8}$/.test(id||'')||!name||name==='이름')continue;newStudents.push({id,name,nickname:nickname||name});}if(!newStudents.length){setNotice('형식: 학번,이름,별명 (한 줄에 학생 1명)');return;}
-  update(prev=>({...prev,students:[...prev.students.filter(s=>!newStudents.some(n=>n.id===s.id)),...newStudents]}));setCsvText('');setNotice(`${newStudents.length}명의 학생 정보를 데모에 반영했습니다.`);
+ const deleteArtwork=(a:Artwork)=>{
+  if(!window.confirm(`'${a.title}' 작품을 삭제할까요?`))return;
+  task(async()=>{await api('delete-artwork',{artworkId:a.id});await refresh();setPreview(null);setNotice('작품을 삭제했습니다.');});
  };
- const exportResults=()=>downloadCsv([['구역','순위','작품 ID','작품 제목','학번','득표수'],...data.categories.flatMap(cat=>tally(data,cat.id).map((a,i)=>[cat.title,i+1,a.id,a.title,a.ownerId,a.points]))], 'art-vote-results.csv');
- const exportParticipation=()=>downloadCsv([['학번','이름','별명','투표 완료'],...data.students.map(s=>[s.id,s.name,s.nickname,data.submissions.some(x=>x.studentId===s.id)?'완료':'미완료'])],'art-vote-participation.csv');
- const nav:[Screen,string,typeof Grid2X2][]=[['upload','작품 등록',ImagePlus],['gallery','투표하기',Eye],['results','투표 결과',Trophy]];
+ const changePhase=(phase:Phase)=>task(async()=>{await api('phase',{phase});await refresh();setNotice(`${phaseLabels[phase]} 단계로 변경했습니다.`);});
+ const importStudents=()=>task(async()=>{
+  const lines=csvText.split(/\r?\n/).filter(Boolean);
+  const students=lines.map(l=>{const [id,name]=l.split(/[\t,]/).map(s=>s.trim());return {id,name};}).filter(x=>/^\d{4,8}$/.test(x.id)&&x.name&&x.name!=='이름');
+  if(!students.length)throw Error('학번,이름 형식으로 입력해 주세요.');
+  const result=await api<{count:number}>('import-students',{students});
+  await refresh();setCsvText('');setNotice(`${result.count}명의 명단을 저장했습니다.`);
+ });
+ const ranked=(cat:number)=>{
+  const list=data.rankings?.[cat]||[];
+  return list.map((r,i)=>({...(data.artworks.find(a=>a.id===r.id)||{id:r.id,title:'삭제된 작품',ownerId:''}),points:r.points,rank:i+1}));
+ };
+ const exportResults=()=>downloadCsv([['구역','순위','작품 ID','제목','학번','득표수'],...categories.flatMap(c=>ranked(c.id).map(a=>[c.title,a.rank,a.id,a.title,a.ownerId,a.points]))],'art-vote-results.csv');
+ const exportParticipation=()=>downloadCsv([['학번','이름','투표 여부'],...data.students.map(s=>[s.id,s.name,s.submitted?'완료':'미완료'])],'art-vote-participation.csv');
+ const nav:[Screen,string][]=[['upload','작품 등록'],['gallery','투표하기'],['results','투표 결과']];
  return <div className="site">
- <header className="header"><div className="header-inner"><button className="brand" onClick={()=>page('home')}><span>미술 작품 투표</span></button>
- <nav className="desktop-nav">{(student||isAdmin)&&nav.map(([s,label])=><button key={s} className={screen===s?'active':''} onClick={()=>page(s)}>{label}</button>)}</nav>
- <div className="header-actions"><span className="demo-pill"><span className="status-dot"/> 시연용</span>{student?<button className="user-button" onClick={leave}><span className="avatar">{student.nickname.slice(0,1)}</span><span>{student.nickname}</span><LogOut size={15}/></button>:isAdmin?<button className="user-button" onClick={leave}><Settings2 size={16}/> 관리자 종료</button>:<button className="text-action" onClick={()=>page('home')}>학생 입장 <ArrowUpRight size={15}/></button>}
- <button className="icon-button burger" aria-label="메뉴 열기" onClick={()=>setMobileOpen(!mobileOpen)}>{mobileOpen?<X size={22}/>:<Menu size={22}/>}</button></div></div></header>
- {mobileOpen&&(student||isAdmin)&&<nav className="mobile-nav">{nav.map(([s,label])=><button key={s} onClick={()=>page(s)}>{label}</button>)}<button onClick={switchAdmin}>관리자 미리보기</button></nav>}
+ <header className="header"><div className="header-inner"><button className="brand" onClick={()=>page('home')}><span>미술 작품 투표</span></button><nav className="desktop-nav">{(student||isAdmin)&&nav.map(([id,label])=><button className={screen===id?'active':''} onClick={()=>page(id)} key={id}>{label}</button>)}</nav><div className="header-actions"><span className="demo-pill"><span className="status-dot"/> 서버 연결</span>{(student||isAdmin)?<button className="user-button" onClick={leave}><span>{student?.name||'관리자'}</span><LogOut size={15}/></button>:null}<button className="icon-button burger" onClick={()=>setMobileOpen(!mobileOpen)} aria-label="메뉴"><Menu size={20}/></button></div></div></header>
+ {mobileOpen&&(student||isAdmin)&&<nav className="mobile-nav">{nav.map(([id,label])=><button key={id} onClick={()=>page(id)}>{label}</button>)}{isAdmin&&<button onClick={()=>page('admin')}>관리자</button>}</nav>}
  <main>
- {screen==='home'&&<section className="section login-page" id="login-section">
- <div className="login-simple"><h1>미술 작품 투표</h1><p>학번과 이름을 입력해 주세요.</p>
- {!student&&!isAdmin?<div className="login-form-simple">
- <label>학번<input placeholder="예: 10301" inputMode="numeric" value={enterId} onChange={e=>setEnterId(e.target.value)}/></label>
- <label>이름<input placeholder="이름을 입력하세요" value={enterName} onChange={e=>setEnterName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&enter()}/></label>
- <button className="btn dark full" onClick={enter}>로그인 <ArrowRight size={17}/></button>
- <p className="login-warning">현재 버전은 화면 확인용이며, 학번·이름만으로는 실제 본인 인증이 되지 않습니다. 실제 학생 정보를 입력하지 마세요.</p>
- </div>:<div className="welcome-card"><div><h3>{isAdmin?'관리자 화면':`${student?.name}님`}</h3><p>원하는 메뉴를 선택하세요.</p></div><button className="btn dark" onClick={()=>page(isAdmin?'admin':'upload')}>시작하기 <ArrowRight size={17}/></button></div>}
- </div></section>}
- {screen==='gallery'&&<div className="section page-section"><PageHeading kicker="EXHIBITION ARCHIVE" title="투표하기" subtitle="섹션별 작품을 확인하고 선택하세요."/><CategorySwitch items={data.categories} value={currentCategory} onChange={setCurrentCategory}/><div className="gallery-heading"><div><span className="kicker">EXHIBITION 0{currentCategory}</span><h2>{data.categories.find(c=>c.id===currentCategory)?.title}</h2><p>{data.categories.find(c=>c.id===currentCategory)?.subtitle}</p></div><div className="gallery-meta"><Shuffle size={16}/> 작품 순서 개인별 배치 <span className="count-pill">{shown.length} 작품</span></div></div><div className="gallery-vote-help">{data.phase==='vote'&&student?<>선택: <strong>{selectedVotes[currentCategory]?.length||0} / 3</strong> · 작품 오른쪽 위 체크박스를 눌러 투표하세요. 이미지는 누르면 확대됩니다.</>:data.phase!=='vote'?'현재는 투표 기간이 아닙니다. 관리자가 투표 진행 단계로 변경하면 선택할 수 있습니다.':'학번과 이름으로 입장하면 투표할 수 있습니다.'}</div><div className="gallery-grid">{shown.map((a,i)=><ArtworkCard key={a.id} a={a} index={i} onClick={()=>setPreview(a)} vote={student?selectedVotes[currentCategory]?.includes(a.id):false} onVote={canVote?()=>choose(a.id):undefined} showVote={!!student&&data.phase==='vote'} owner={a.ownerId===student?.id}/>)}</div>{shown.length===0&&<EmptyState title="아직 등록된 작품이 없습니다." text="작품 등록 기간에 멋진 작품을 올려 주세요."/>}<div className="bottom-cta"><div><span className="kicker">CAST YOUR VOTE</span><h3>마음에 남는 작품을 선택하세요.</h3><p>한 구역에서 최대 3개의 작품을 선택할 수 있습니다.</p></div><button className="btn dark" onClick={()=>page('my-votes')}>내 투표 확인 <ArrowRight size={17}/></button></div></div>}
- {screen==='upload'&&<div className="section page-section"><PageHeading kicker="MY PORTFOLIO" title="작품 등록" subtitle="5개 섹션 중 원하는 섹션에만 작품을 등록해도 됩니다. 모든 섹션을 채울 필요는 없습니다."/>{!student?<LoginRequired onHome={()=>page('home')}/>:<><CategorySwitch items={data.categories} value={uploadCategory} onChange={setUploadCategory}/><div className="upload-layout"><div className="upload-editor"><div className="editor-head"><span className="step-tag">01 / 작품 정보</span><span className="phase-chip">{phaseLabels[data.phase]}</span></div><h3>{editingId?'작품 수정하기':'새 작품 등록하기'}</h3><p className="muted">선택한 섹션에 작품 제목과 이미지 한 장만 입력하면 즉시 등록됩니다. 다른 섹션은 비워 두어도 됩니다.</p><label className="field-label">전시 주제<select value={uploadCategory} onChange={e=>setUploadCategory(Number(e.target.value))} disabled={!canUpload}>{data.categories.map(c=><option key={c.id} value={c.id}>{c.title}</option>)}</select></label><label className="field-label">작품 제목<input maxLength={60} value={uploadTitle} onChange={e=>setUploadTitle(e.target.value)} placeholder="작품 제목을 입력하세요" disabled={!canUpload}/></label><span className="field-label">작품 이미지</span><label className={`upload-drop ${uploadImage?'filled':''}`}>{uploadImage?<img src={uploadImage} alt="업로드 미리보기"/>:<><UploadCloud size={32}/><strong>{uploadBusy?'이미지 처리 중…':'이미지를 선택하거나 업로드하세요'}</strong><small>JPG, PNG, WebP · 15MB 이하 · 자동 WebP 압축</small></>}<input type="file" accept="image/*" disabled={!canUpload||uploadBusy} onChange={e=>{void onImage(e.target.files?.[0]);e.target.value='';}}/></label><div className="editor-actions"><button className="btn dark" onClick={saveArtwork} disabled={!canUpload||!uploadImage||!uploadTitle.trim()||uploadBusy}>{editingId?'수정 저장':'작품 등록'} <ArrowRight size={17}/></button>{editingId&&<button className="btn outline" onClick={()=>{setEditingId(null);setUploadImage('');setUploadTitle('');}}>수정 취소</button>}</div>{!canUpload&&<div className="info-banner"><LockKeyhole size={18}/> 현재는 작품 등록 기간이 아닙니다. 관리자가 등록 단계를 열어야 합니다.</div>}</div><div className="uploaded-panel"><div className="panel-heading"><h3>내가 등록한 작품</h3><span>{personalArt.length}개</span></div>{personalArt.length===0?<EmptyState title="등록한 작품이 없습니다." text="왼쪽에서 첫 작품을 등록해 보세요."/>:<div className="personal-art-list">{personalArt.map(a=><div className="personal-art" key={a.id}><img src={a.image} alt={a.title}/><div><strong>{a.title}</strong><span>{data.categories.find(c=>c.id===a.categoryId)?.title}</span><div className="small-actions"><button disabled={!canUpload} onClick={()=>editArtwork(a)}><Pencil size={13}/> 수정</button><button disabled={!canUpload} onClick={()=>deleteArtwork(a)}><Trash2 size={13}/> 삭제</button></div></div></div>)}</div>}</div></div></>}</div>}
- {screen==='my-votes'&&<div className="section page-section"><PageHeading kicker="YOUR SELECTION" title="내 투표" subtitle="원하는 섹션에서 작품을 선택하세요. 섹션별 최대 3개, 전체 최대 15개입니다."/>{!student?<LoginRequired onHome={()=>page('home')}/>:<><div className="vote-summary"><div><span className="kicker">VOTING PROGRESS</span><h2>{selectedCount}<small> / 15 작품</small></h2><p>{submitted?'최종 제출이 완료되었습니다.':data.phase==='vote'?'투표할 작품을 1개 이상 선택하면 제출할 수 있습니다. 비워 둔 섹션이 있어도 됩니다.':'투표 기간이 아닙니다.'}</p></div><div className="progress-ring">{Math.round(selectedCount/15*100)}<small>%</small></div></div><div className="vote-categories">{data.categories.map(c=><div className="vote-category-card" key={c.id}><div className="vote-category-heading"><div><span>EXHIBITION 0{c.id}</span><h3>{c.title}</h3></div><span className={`slot-counter ${selectedVotes[c.id]?.length===3?'complete':''}`}>{selectedVotes[c.id]?.length||0} / 3</span></div><div className="vote-slots">{[0,1,2].map(i=>{const a=data.artworks.find(a=>a.id===selectedVotes[c.id]?.[i]);return <div key={i} className={`vote-slot ${a?'occupied':''}`}>{a?<><img src={a.image} alt={a.title}/><div className="vote-slot-label">{a.title}</div>{!submitted&&canVote&&<button aria-label="선택 취소" onClick={()=>{setCurrentCategory(c.id);setVotes(old=>({...old,[c.id]:old[c.id].filter(x=>x!==a.id)}));}}><X size={14}/></button>}</>:<><Plus size={17}/><small>선택 {i+1}</small></>}</div>;})}</div><button className="inline-link" onClick={()=>{setCurrentCategory(c.id);page('gallery');}}>{submitted?'작품 확인하기':'작품 선택하기'} <ArrowRight size={15}/></button></div>)}</div><div className="submit-bar"><div><strong>{submitted?'투표가 제출되었습니다.':'선택한 작품을 확인하셨나요?'}</strong><p>{submitted?'실제 서비스에서는 제출 후 수정 정책을 관리자 설정으로 결정합니다.':'선택한 작품이 1개 이상이면 제출할 수 있습니다. 섹션별 최대 3개까지 선택 가능합니다.'}</p></div><button className="btn dark" disabled={submitted||!canVote||selectedCount<1} onClick={()=>setConfirmSubmit(true)}>{submitted?'제출 완료':'최종 투표 제출'} <Check size={17}/></button></div></>}</div>}
- {screen==='results'&&<div className="section page-section"><PageHeading kicker="ART AWARDS" title="투표 결과" subtitle="섹션별 작품 순위를 확인하세요."/>{!resultsVisible?<div className="locked-results"><div className="lock-icon"><LockKeyhole size={32}/></div><span className="kicker">COMING SOON</span><h2>결과 공개를 기다려 주세요.</h2><p>관리자가 투표를 마감하고 결과를 공개하면<br/>이곳에서 각 주제별 작품 순위를 확인할 수 있습니다.</p><button className="btn outline" onClick={()=>page('gallery')}>투표하기로 이동 <ArrowRight size={17}/></button></div>:<><CategorySwitch items={data.categories} value={currentCategory} onChange={setCurrentCategory}/><div className="results-heading"><div><span className="kicker">RESULTS / EXHIBITION 0{currentCategory}</span><h2>{data.categories.find(c=>c.id===currentCategory)?.title}</h2></div>{isAdmin&&<button className="btn outline" onClick={exportResults}><Download size={16}/> CSV 다운로드</button>}</div><div className="ranking-list">{tally(data,currentCategory).map((a,i)=><div className={`ranking-item ${i===0?'winner':''}`} key={a.id}><span className="ranking-number">{String(i+1).padStart(2,'0')}</span><img src={a.image} alt={a.title}/><div className="ranking-title"><strong>{a.title}</strong><span>ARTWORK {a.id.slice(-4).toUpperCase()}{student?.id===a.ownerId?' · 내 작품':''}</span></div><div className="ranking-count"><strong>{a.points}</strong><span>VOTES</span></div></div>)}</div>{tally(data,currentCategory).length===0&&<EmptyState title="집계할 작품이 없습니다." text="이 구역에 작품이 등록되면 순위가 나타납니다."/>}{student&&<div className="my-rank"><Trophy size={20}/><div><strong>내 작품 순위</strong><p>{data.artworks.filter(a=>a.ownerId===student.id&&a.categoryId===currentCategory).map(a=>{const rank=tally(data,currentCategory).findIndex(x=>x.id===a.id)+1;return `${a.title}: ${rank?rank+'위':'집계 제외'}`;}).join(' · ')||'이 구역에 등록한 작품이 없습니다.'}</p></div></div>}</>}</div>}
- {screen==='admin'&&<div className="section page-section"><PageHeading kicker="MANAGEMENT CONSOLE" title="관리자 대시보드" subtitle="작품, 학생, 투표 현황을 한곳에서 관리합니다."/>{!isAdmin?<div className="admin-gate"><ShieldAlert size={28}/><h3>관리자 화면은 미리보기 전용입니다.</h3><p>현재 버전에는 관리자 인증이 없습니다. 실서비스에 사용하기 전에 Supabase Auth와 서버 측 관리자 권한 검증을 반드시 구현해야 합니다.</p><button className="btn dark" onClick={switchAdmin}>관리자 화면 미리보기 <ArrowRight size={17}/></button></div>:<><div className="admin-alert"><ShieldAlert size={19}/><div><strong>프론트엔드 시연 모드</strong><span>여기의 설정은 브라우저에만 저장됩니다. 실제 학생에게 배포하거나 실명 정보를 등록하지 마세요.</span></div></div><div className="admin-tabs">{([['overview','대시보드',LayoutDashboard],['artworks','작품 관리',FileImage],['students','학생 관리',Users],['results','결과 관리',Trophy]] as const).map(([id,label,Icon])=><button className={adminTab===id?'active':''} key={id} onClick={()=>setAdminTab(id)}><Icon size={17}/>{label}</button>)}</div>
- {adminTab==='overview'&&<><div className="dashboard-cards"><Metric label="등록 학생" value={data.students.length} sub="STUDENTS" icon={<Users size={19}/>}/><Metric label="등록 작품" value={data.artworks.length} sub="TOTAL ARTWORKS" icon={<FileImage size={19}/>}/><Metric label="투표 완료" value={data.submissions.length} sub="COMPLETED VOTES" icon={<Vote size={19}/>}/><Metric label="참여율" value={`${data.students.length?Math.round(data.submissions.length/data.students.length*100):0}%`} sub="PARTICIPATION" icon={<CheckCircle2 size={19}/>}/></div><div className="admin-two-col"><div className="admin-box"><div className="panel-heading"><h3>운영 단계</h3><span>{phaseLabels[data.phase]}</span></div><p className="muted">단계에 따라 작품 등록, 투표 및 결과 공개 기능이 달라집니다.</p><div className="phase-buttons">{(['upload','review','vote','closed','results'] as Phase[]).map(p=><button key={p} className={data.phase===p?'active':''} onClick={()=>changePhase(p)}><span className="radio-dot"/>{phaseLabels[p]}</button>)}</div></div><div className="admin-box"><div className="panel-heading"><h3>구역별 작품 현황</h3><span>5개 섹션</span></div>{data.categories.map(c=><div className="bar-row" key={c.id}><div><span>{c.title}</span><strong>{data.artworks.filter(a=>a.categoryId===c.id).length}개</strong></div><div className="bar-track"><div style={{width:`${Math.min(100,data.artworks.filter(a=>a.categoryId===c.id).length/50*100)}%`}}/></div></div>)}</div></div></>}
- {adminTab==='artworks'&&<div className="admin-box"><div className="panel-heading"><h3>작품 목록</h3><span>{data.artworks.length}개</span></div><div className="search-field"><Search size={17}/><input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="작품명 또는 학번으로 검색"/></div><div className="admin-art-list">{data.artworks.filter(a=>a.title.includes(filter)||a.ownerId.includes(filter)).map(a=><div key={a.id} className="admin-art-row"><img src={a.image} alt={a.title}/><div><strong>{a.title}</strong><span>{data.categories.find(c=>c.id===a.categoryId)?.title} · {a.ownerId}</span></div><button className="icon-button" aria-label="이미지 보기" onClick={()=>setPreview(a)}><Eye size={17}/></button><button className="icon-button danger" aria-label="삭제" onClick={()=>deleteArtwork(a)}><Trash2 size={17}/></button></div>)}</div></div>}
- {adminTab==='students'&&<div className="admin-two-col"><div className="admin-box"><div className="panel-heading"><h3>학생 명단</h3><button className="mini-button" onClick={exportParticipation}><Download size={14}/> 참여 현황 CSV</button></div><div className="student-list"><div className="student-row header-row"><span>학번</span><span>이름 / 별명</span><span>참여</span></div>{data.students.map(s=><div className="student-row" key={s.id}><span>{s.id}</span><span>{s.name} <small>{s.nickname}</small></span><span className={data.submissions.some(x=>x.studentId===s.id)?'green-text':'muted'}>{data.submissions.some(x=>x.studentId===s.id)?'완료':'미완료'}</span></div>)}</div></div><div className="admin-box"><h3>학생 명단 입력</h3><p className="muted">데모에서는 학번,이름 형식으로 여러 줄을 입력할 수 있습니다.</p><textarea value={csvText} onChange={e=>setCsvText(e.target.value)} placeholder={'10301,김학생\n10302,이학생'} rows={9}/><button className="btn dark" onClick={importStudents}>명단 반영 <ArrowRight size={17}/></button><p className="warning-note">실제 학번·이름을 여기에 입력하지 마세요. 현재 버전은 개인정보 보호와 인증이 구현되지 않았습니다.</p></div></div>}
- {adminTab==='results'&&<div className="admin-box"><div className="panel-heading"><h3>구역별 순위</h3><button className="mini-button" onClick={exportResults}><Download size={15}/> 전체 결과 CSV</button></div><CategorySwitch items={data.categories} value={currentCategory} onChange={setCurrentCategory}/><div className="result-table"><div className="table-head"><span>순위</span><span>작품</span><span>득표수</span></div>{tally(data,currentCategory).map((a,i)=><div className="table-row" key={a.id}><span>{i+1}위</span><span>{a.title}</span><strong>{a.points}표</strong></div>)}</div></div>}
- <div className="admin-footer"><button className="mini-button danger" onClick={resetDemo}><Trash2 size={15}/> 데모 데이터 초기화</button></div></>}</div>}
+ {screen==='home'&&<section className="section login-page"><div className="login-simple"><h1>미술 작품 투표</h1><p>학번과 이름을 입력해 주세요.</p>{!student&&!isAdmin?<div className="login-form-simple"><label>학번<input inputMode="numeric" placeholder="예: 30901" value={enterId} onChange={e=>setEnterId(e.target.value)}/></label><label>이름<input placeholder="이름" value={enterName} onChange={e=>setEnterName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')enter();}}/></label><button className="btn dark full" disabled={busy||!ready} onClick={enter}>입장하기 <ArrowRight size={17}/></button><p className="login-warning">학번과 이름이 일치하는 학생만 입장합니다. 비밀번호가 없으므로 타인이 학번과 이름을 알고 있다면 대신 접속할 수 있습니다.</p></div>:<div className="welcome-card"><h3>{student?.name||'관리자'}님</h3><button className="btn dark" onClick={()=>page(isAdmin?'admin':'upload')}>시작하기</button></div>}</div></section>}
+ {screen==='upload'&&<section className="section page-section"><PageHeading kicker="UPLOAD" title="작품 등록" subtitle="원하는 섹션에만 작품을 등록해도 됩니다."/>{!student&&!isAdmin?<EmptyState text="학생으로 로그인해 주세요."/>:<><CategorySwitch items={categories} value={uploadCategory} onChange={v=>{setUploadCategory(v);setUploadTitle('');setUploadImage('');setEditingId(null);}}/>{student&&<div className="admin-box"><div className="panel-heading"><h3>{editingId?'작품 수정':'작품 새로 등록'}</h3><span>{categories.find(c=>c.id===uploadCategory)?.title}</span></div>{!canUpload&&<p className="warning-note">현재는 작품 등록 기간이 아닙니다.</p>}<label className="form-label">작품 제목<input className="form-input" value={uploadTitle} onChange={e=>setUploadTitle(e.target.value)} maxLength={100} placeholder="작품 제목" disabled={!canUpload||busy}/></label><label className="form-label">작품 사진<input type="file" accept="image/*" disabled={!canUpload||busy} onChange={e=>onImage(e.target.files?.[0])}/></label>{uploadImage&&<img className="upload-preview" src={uploadImage} alt="업로드 미리보기"/>}<button className="btn dark" disabled={!canUpload||busy} onClick={saveArtwork}><ImagePlus size={17}/>{editingId?'변경 저장':'작품 등록'}</button>{editingId&&<button className="mini-button" onClick={()=>{setEditingId(null);setUploadTitle('');setUploadImage('');}}>수정 취소</button>}</div>}<div className="admin-box"><h3>등록된 작품</h3><div className="admin-art-list">{(isAdmin?data.artworks.filter(a=>a.categoryId===uploadCategory):personalArt.filter(a=>a.categoryId===uploadCategory)).map(a=><div className="admin-art-row" key={a.id}><img src={a.image} alt={a.title}/><div><strong>{a.title}</strong><span>{categories.find(c=>c.id===a.categoryId)?.title}</span></div><button className="icon-button" onClick={()=>setPreview(a)} aria-label="작품 보기"><Eye size={17}/></button>{student&&canUpload&&<button className="icon-button" onClick={()=>editArtwork(a)} aria-label="작품 수정"><Pencil size={17}/></button>}{(isAdmin||canUpload)&&<button className="icon-button danger" onClick={()=>deleteArtwork(a)} aria-label="작품 삭제"><Trash2 size={17}/></button>}</div>)}{!(isAdmin?data.artworks:personalArt).some(a=>a.categoryId===uploadCategory)&&<EmptyState text="아직 등록한 작품이 없습니다."/>}</div></div></>}</section>}
+ {screen==='gallery'&&<section className="section page-section"><PageHeading kicker="GALLERY" title="투표하기" subtitle="각 섹션에서 최대 3개까지 선택하세요."/><CategorySwitch items={categories} value={currentCategory} onChange={setCurrentCategory}/><div className="gallery-heading"><h2>{categories.find(c=>c.id===currentCategory)?.title}</h2><div className="gallery-meta"><Shuffle size={16}/> 작품 순서 개인별 배치 · {shown.length}개</div></div><div className="gallery-vote-help">{canVote?`선택 ${selectedVotes[currentCategory]?.length||0}/3 · 체크박스로 선택하고 이미지를 누르면 확대됩니다.`:data.submitted?'이미 최종 제출했습니다.':data.phase!=='vote'?'현재 투표 기간이 아닙니다.':'학생으로 로그인해 주세요.'}</div><div className="gallery-grid">{shown.map((a,i)=><ArtworkCard key={a.id} a={a} index={i} onClick={()=>setPreview(a)} vote={selectedVotes[currentCategory]?.includes(a.id)} owner={a.ownerId==='ME'} onVote={canVote?()=>choose(a.id):undefined} showVote={!!student&&data.phase==='vote'}/>)}</div>{!shown.length&&<EmptyState text="현재 섹션에 등록된 작품이 없습니다."/>}{student&&<div className="submit-bar"><div><strong>내가 선택한 작품: {selectedCount} / 15</strong><p>한 섹션에 3개 이하, 전체에서 1개 이상이면 제출할 수 있습니다.</p></div><button className="btn dark" disabled={!canVote||selectedCount<1||busy} onClick={()=>setConfirmSubmit(true)}>최종 투표 제출 <Check size={17}/></button></div>}</section>}
+ {screen==='my-votes'&&<section className="section page-section"><PageHeading kicker="MY BALLOT" title="내 투표 확인" subtitle="내가 제출한 작품을 확인하세요."/>{categories.map(c=><div className="admin-box" key={c.id}><h3>{c.title}</h3>{(selectedVotes[c.id]||[]).map(id=><div key={id}>{data.artworks.find(a=>a.id===id)?.title||'작품'}</div>)}</div>)}</section>}
+ {screen==='results'&&<section className="section page-section"><PageHeading kicker="RESULTS" title="투표 결과" subtitle="섹션별 작품 순위"/>{!resultsVisible?<EmptyState text="관리자가 투표 결과를 공개한 뒤 확인할 수 있습니다."/>:<><CategorySwitch items={categories} value={currentCategory} onChange={setCurrentCategory}/><div className="result-table"><div className="table-head"><span>순위</span><span>작품</span><span>득표수</span></div>{ranked(currentCategory).map(a=><div className="table-row" key={a.id}><span>{a.rank}위</span><span>{a.title}{a.ownerId==='ME'?' (내 작품)':''}</span><strong>{a.points}표</strong></div>)}</div></>}</section>}
+ {screen==='admin'&&<section className="section page-section"><PageHeading kicker="ADMIN" title="관리자" subtitle="운영 단계와 학생 명단을 관리합니다."/>{!isAdmin?<div className="admin-gate"><ShieldAlert size={24}/><h3>관리자 로그인</h3><p>학생용 학번·이름 로그인과 별도로 보호됩니다.</p><input type="password" className="form-input" placeholder="관리자 비밀번호" value={adminPass} onChange={e=>setAdminPass(e.target.value)} onKeyDown={e=>e.key==='Enter'&&loginAdmin()}/><button className="btn dark" onClick={loginAdmin} disabled={busy}>관리자 로그인</button></div>:<><div className="admin-tabs">{([['overview','대시보드'],['artworks','작품 관리'],['students','학생 관리'],['results','결과 관리']] as const).map(([id,label])=><button className={adminTab===id?'active':''} onClick={()=>setAdminTab(id)} key={id}>{label}</button>)}</div>
+ {adminTab==='overview'&&<><div className="dashboard-cards"><Metric label="등록 학생" value={data.students.length}/><Metric label="등록 작품" value={data.artworks.length}/><Metric label="투표 완료" value={data.students.filter(s=>s.submitted).length}/><Metric label="참여율" value={`${data.students.length?Math.round(data.students.filter(s=>s.submitted).length/data.students.length*100):0}%`}/></div><div className="admin-box"><h3>운영 단계</h3><div className="phase-buttons">{(['upload','review','vote','closed','results'] as Phase[]).map(p=><button key={p} className={data.phase===p?'active':''} onClick={()=>changePhase(p)} disabled={busy}>{phaseLabels[p]}</button>)}</div></div></>}
+ {adminTab==='artworks'&&<div className="admin-box"><h3>작품 관리</h3><div className="search-field"><Search size={17}/><input value={filter} placeholder="제목 또는 학번 검색" onChange={e=>setFilter(e.target.value)}/></div><div className="admin-art-list">{data.artworks.filter(a=>a.title.includes(filter)||a.ownerId.includes(filter)).map(a=><div className="admin-art-row" key={a.id}><img src={a.image} alt={a.title}/><div><strong>{a.title}</strong><span>{categories.find(c=>c.id===a.categoryId)?.title} · {a.ownerId}</span></div><button className="icon-button" onClick={()=>setPreview(a)}><Eye size={17}/></button><button className="icon-button danger" onClick={()=>deleteArtwork(a)}><Trash2 size={17}/></button></div>)}</div></div>}
+ {adminTab==='students'&&<div className="admin-two-col"><div className="admin-box"><div className="panel-heading"><h3>학생 명단</h3><button className="mini-button" onClick={exportParticipation}><Download size={15}/> CSV</button></div><div className="student-list">{data.students.map(s=><div className="student-row" key={s.id}><span>{s.id}</span><span>{s.name}</span><span>{s.submitted?'완료':'미완료'}</span></div>)}</div></div><div className="admin-box"><h3>학생 명단 추가·수정</h3><p>학번,이름 형식으로 줄마다 입력</p><textarea rows={9} value={csvText} onChange={e=>setCsvText(e.target.value)} placeholder={'30901,테스트1\n30902,테스트2'}/><button className="btn dark" disabled={busy} onClick={importStudents}>명단 저장</button></div></div>}
+ {adminTab==='results'&&<div className="admin-box"><div className="panel-heading"><h3>구역별 순위</h3><button className="mini-button" onClick={exportResults}><Download size={15}/> 결과 CSV</button></div><CategorySwitch items={categories} value={currentCategory} onChange={setCurrentCategory}/><div className="result-table"><div className="table-head"><span>순위</span><span>작품</span><span>득표수</span></div>{ranked(currentCategory).map(a=><div className="table-row" key={a.id}><span>{a.rank}위</span><span>{a.title}</span><strong>{a.points}표</strong></div>)}</div></div>}
+ </>}</section>}
  </main>
- <footer className="footer"><div className="footer-inner"><div><div className="footer-brand"><strong>미술 작품 투표</strong></div></div><div className="footer-right"><button onClick={switchAdmin}>관리자 화면 <ArrowUpRight size={14}/></button></div></div><div className="copyright">화면 확인용 · 데이터는 현재 브라우저에만 저장됩니다.</div></footer>
- {preview&&<div className="modal-backdrop" onMouseDown={()=>setPreview(null)}><div className="art-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" aria-label="닫기" onClick={()=>setPreview(null)}><X size={21}/></button><div className="modal-image"><img src={preview.image} alt={preview.title}/></div><div className="modal-details"><span className="kicker">EXHIBITION 0{preview.categoryId}</span><h2>{preview.title}</h2><p>{data.categories.find(c=>c.id===preview.categoryId)?.title}</p><div className="modal-bottom"><span>ARTWORK · {preview.id.slice(-6).toUpperCase()}</span>{student&&data.phase==='vote'&&<button className={`btn ${selectedVotes[preview.categoryId]?.includes(preview.id)?'outline':'dark'}`} onClick={()=>{setCurrentCategory(preview.categoryId);chooseArtworkFromModal(preview.id,preview.categoryId);}}>{selectedVotes[preview.categoryId]?.includes(preview.id)?'선택 취소':'이 작품 선택'} <Heart size={16}/></button>}</div></div></div></div>}
- {confirmSubmit&&<div className="modal-backdrop"><div className="confirm-modal"><span className="kicker">FINAL SUBMISSION</span><h2>투표를 최종 제출할까요?</h2><p>총 {selectedCount}개의 작품을 선택했습니다. 데모에서는 제출 후 관리자가 투표 단계를 다시 열어도 자동 수정되지 않습니다.</p><div className="confirm-actions"><button className="btn outline" onClick={()=>setConfirmSubmit(false)}>돌아가기</button><button className="btn dark" onClick={submit}>제출하기 <Check size={16}/></button></div></div></div>}
- {notice&&<div role="status" className="toast"><Sparkles size={16}/>{notice}<button aria-label="알림 닫기" onClick={()=>setNotice('')}><X size={14}/></button></div>}
+ <footer className="footer"><div className="footer-inner"><strong>미술 작품 투표</strong><button className="mini-button" onClick={()=>page('admin')}><Settings2 size={14}/> 관리자</button></div></footer>
+ {preview&&<div className="modal-backdrop" onMouseDown={()=>setPreview(null)}><div className="art-modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-close" onClick={()=>setPreview(null)}><X size={20}/></button><div className="modal-image"><img src={preview.image} alt={preview.title}/></div><div className="modal-details"><h2>{preview.title}</h2><p>{categories.find(c=>c.id===preview.categoryId)?.title}</p>{canVote&&<button className="btn dark" onClick={()=>choose(preview.id,preview.categoryId)}>{selectedVotes[preview.categoryId]?.includes(preview.id)?'선택 취소':'이 작품 선택'}</button>}</div></div></div>}
+ {confirmSubmit&&<div className="modal-backdrop"><div className="confirm-modal"><h2>투표를 최종 제출할까요?</h2><p>총 {selectedCount}개의 작품을 선택했습니다. 제출 후 변경할 수 없습니다.</p><div className="confirm-actions"><button className="btn outline" onClick={()=>setConfirmSubmit(false)}>취소</button><button className="btn dark" onClick={submit} disabled={busy}>제출하기</button></div></div></div>}
+ {notice&&<div role="status" className="toast"><Sparkles size={16}/>{notice}<button onClick={()=>setNotice('')}><X size={14}/></button></div>}
+ {!configured()&&<div className="toast">Supabase 프로젝트 URL을 설정해 주세요.</div>}
  </div>;
- function chooseArtworkFromModal(id:string,cat:number){if(!canVote||!student)return;const a=data.artworks.find(x=>x.id===id);if(!a)return;if(a.ownerId===student.id){setNotice('본인의 작품에는 투표할 수 없습니다.');return;}setVotes(old=>{const items=old[cat]||[];if(items.includes(id))return {...old,[cat]:items.filter(x=>x!==id)};if(items.length>=3){setNotice('한 구역에는 최대 3개만 선택할 수 있습니다.');return old;}return {...old,[cat]:[...items,id]};});}
 }
 function PageHeading({kicker,title,subtitle}:{kicker:string;title:string;subtitle:string}){return <div className="page-heading"><div className="kicker">{kicker}</div><h1>{title}</h1><p>{subtitle}</p></div>;}
-function CategoryTiles({items,artworks,onSelect}:{items:Category[];artworks:Artwork[];onSelect:(id:number)=>void}){return <div className="category-grid">{items.map((c,i)=><button key={c.id} className="category-tile" style={{background:c.color}} onClick={()=>onSelect(c.id)}><span className="category-number">0{c.id} / 05</span><div className="category-art"><img src={artworks.find(a=>a.categoryId===c.id)?.image||''} alt=""/></div><div className="category-caption"><span>{c.en}</span><h3>{c.title}</h3><p>{c.subtitle}</p></div><span className="tile-arrow"><ArrowUpRight size={20}/></span></button>)}</div>;}
-function CategorySwitch({items,value,onChange}:{items:Category[];value:number;onChange:(id:number)=>void}){return <div className="category-switch">{items.map(c=><button key={c.id} className={value===c.id?'active':''} onClick={()=>onChange(c.id)}><span>0{c.id}</span> {c.title}</button>)}</div>;}
+function CategorySwitch({items,value,onChange}:{items:Category[];value:number;onChange:(id:number)=>void}){return <div className="category-switch">{items.map(c=><button key={c.id} className={value===c.id?'active':''} onClick={()=>onChange(c.id)}>{c.title}</button>)}</div>;}
 function ArtworkCard({a,index,onClick,vote,onVote,showVote,owner}:{a:Artwork;index:number;onClick:()=>void;vote?:boolean;onVote?:()=>void;showVote:boolean;owner:boolean}){
- return <article className={`art-card ${vote?'art-card-selected':''}`}>
-  <div className="art-image-wrap">
-   <button className="art-image" onClick={onClick} aria-label={`${a.title} 작품 확대`}><img src={a.image} loading="lazy" alt={a.title}/><span className="view-art"><Eye size={17}/> 작품 확대</span>{owner&&<span className="owner-tag">내 작품</span>}</button>
-   {showVote&&<button type="button" className={`vote-checkbox ${vote?'selected':''}`} aria-pressed={!!vote} aria-label={owner?'내 작품은 투표할 수 없습니다.':vote?`${a.title} 선택 취소`:`${a.title} 투표 선택`} title={owner?'내 작품은 투표할 수 없습니다.':vote?'선택 취소':'작품 선택'} disabled={!onVote||owner} onClick={e=>{e.stopPropagation();onVote?.();}}><span className="vote-checkbox-icon">{vote&&<Check size={20} strokeWidth={3}/>}</span><span className="vote-checkbox-label">{owner?'내 작품':vote?'선택됨':'선택'}</span></button>}
-  </div>
-  <div className="art-description"><div><span>NO. {String(index+1).padStart(3,'0')}</span><h3>{a.title}</h3></div>{showVote&&<span className="art-vote-status">{owner?'투표 불가':vote?'투표 선택됨':'체크박스로 선택'}</span>}</div>
- </article>;
+ return <article className={`art-card ${vote?'art-card-selected':''}`}><div className="art-image-wrap"><button className="art-image" onClick={onClick}><img src={a.image} loading="lazy" alt={a.title}/><span className="view-art"><Eye size={17}/> 확대</span></button>{showVote&&<button type="button" className={`vote-checkbox ${vote?'selected':''}`} aria-pressed={!!vote} disabled={!onVote||owner} onClick={e=>{e.stopPropagation();onVote?.();}}><span className="vote-checkbox-icon">{vote&&<Check size={18}/>}</span><span className="vote-checkbox-label">{owner?'내 작품':vote?'선택됨':'선택'}</span></button>}</div><div className="art-description"><span>NO. {String(index+1).padStart(3,'0')}</span><h3>{a.title}</h3></div></article>;
 }
-function EmptyState({title,text}:{title:string;text:string}){return <div className="empty-state"><FileImage size={32}/><h3>{title}</h3><p>{text}</p></div>;}
-function LoginRequired({onHome}:{onHome:()=>void}){return <div className="locked-results"><LogIn size={32}/><h2>학생 입장이 필요합니다.</h2><p>학번과 이름으로 데모에 입장한 후 이용할 수 있습니다.</p><button className="btn dark" onClick={onHome}>입장 화면으로 가기 <ArrowRight size={16}/></button></div>;}
-function Metric({label,value,sub,icon}:{label:string;value:number|string;sub:string;icon:React.ReactNode}){return <div className="metric"><div className="metric-header"><span>{label}</span>{icon}</div><strong>{value}</strong><small>{sub}</small></div>;}
+function EmptyState({text}:{text:string}){return <div className="empty-state"><FileImage size={32}/><p>{text}</p></div>;}
+function Metric({label,value}:{label:string;value:string|number}){return <div className="metric"><div className="metric-header"><span>{label}</span></div><strong>{value}</strong></div>;}
 export default App;
