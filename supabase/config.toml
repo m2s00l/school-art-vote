@@ -1,0 +1,2 @@
+[functions.art-api]
+verify_jwt = false
