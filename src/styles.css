@@ -17,3 +17,15 @@
 .category-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
 @media(max-width:1100px){.category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.category-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.login-form-simple{padding:24px}}
+
+/* v3: explicit voting checkboxes and responsive gallery */
+.gallery-vote-help{margin:4px 0 20px;padding:14px 17px;background:#ecece8;border-left:3px solid #232421;font-size:13px;line-height:1.7;color:#343631}
+.art-image-wrap{position:relative}
+.art-card-selected .art-image-wrap{outline:3px solid #20221f;outline-offset:-3px}
+.vote-checkbox{position:absolute;z-index:3;right:12px;top:12px;min-height:42px;display:flex;align-items:center;gap:8px;padding:7px 11px;background:#fff;border:1px solid #333;box-shadow:0 2px 9px #0003;color:#20211f;border-radius:7px;font-size:12px;font-weight:700;opacity:1!important}
+.vote-checkbox:hover:not(:disabled){background:#efefec}
+.vote-checkbox.selected{color:#fff;background:#20221f;border-color:#20221f}
+.vote-checkbox-icon{height:22px;width:22px;border:2px solid currentColor;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.vote-checkbox:disabled{opacity:.65!important;cursor:not-allowed}
+.art-vote-status{font-size:11px!important;letter-spacing:0!important;color:#555!important;white-space:nowrap}
+@media(max-width:700px){.vote-checkbox{top:8px;right:8px;padding:6px;min-height:36px}.vote-checkbox-label{font-size:10px}.vote-checkbox-icon{width:20px;height:20px}.art-vote-status{font-size:9px!important}.gallery-vote-help{font-size:12px}}
